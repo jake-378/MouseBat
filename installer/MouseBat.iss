@@ -1,6 +1,6 @@
 #define AppName "MouseBat"
 #ifndef AppVersion
-#define AppVersion "1.1.0"
+#define AppVersion "1.1.1"
 #endif
 #define AppPublisher "Jake Taylor"
 #define AppExeName "MouseBat.exe"
@@ -18,6 +18,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\installer-output
 OutputBaseFilename=MouseBat-Setup-{#AppVersion}
+SetupIconFile=..\res\mousebat.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2/ultra64
 SolidCompression=yes

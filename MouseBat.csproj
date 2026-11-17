@@ -7,8 +7,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>MouseBat</AssemblyName>
     <RootNamespace>MouseBat</RootNamespace>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>res\mousebat.ico</ApplicationIcon>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
