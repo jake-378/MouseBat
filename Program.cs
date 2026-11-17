@@ -68,7 +68,7 @@ internal sealed class BatteryContext : ApplicationContext
         tray.DoubleClick += (_, _) => RefreshBattery();
         widget = new BatteryWidget(RefreshBattery) { ContextMenuStrip = menu };
         widget.Show();
-        dockTimer = new System.Windows.Forms.Timer { Interval = 2500 };
+        dockTimer = new System.Windows.Forms.Timer { Interval = 500 };
         dockTimer.Tick += (_, _) => widget.UpdateDockPosition();
         dockTimer.Start();
         timer = new System.Windows.Forms.Timer { Interval = 60_000 };
@@ -265,10 +265,11 @@ internal sealed class BatteryWidget : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = true;
-        Size = new Size(116, 42);
+        Size = new Size(84, 34);
         MinimumSize = Size;
         MaximumSize = Size;
-        BackColor = Color.FromArgb(29, 31, 39);
+        BackColor = Color.Magenta;
+        TransparencyKey = Color.Magenta;
         DoubleBuffered = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
         placement = ReadPlacement();
@@ -278,8 +279,6 @@ internal sealed class BatteryWidget : Form
         MouseMove += WidgetMouseMove;
         MouseUp += WidgetMouseUp;
         Shown += (_, _) => UpdateDockPosition();
-        SizeChanged += (_, _) => UpdateRegion();
-        UpdateRegion();
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -388,46 +387,22 @@ internal sealed class BatteryWidget : Form
     {
         base.OnPaint(e);
         Graphics g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-        var panel = new RectangleF(0.75f, 0.75f, Width - 1.5f, Height - 1.5f);
-        using var path = new GraphicsPath();
-        path.AddRoundedRectangle(panel, 8);
-        using var background = new SolidBrush(BackColor);
-        using var border = new Pen(Color.FromArgb(92, 96, 109), 1.25f);
-        g.FillPath(background, path);
-        g.DrawPath(border, path);
+        g.SmoothingMode = SmoothingMode.None;
+        g.TextRenderingHint = TextRenderingHint.SingleBitPerPixelGridFit;
 
         Color textColor = sleeping ? Color.FromArgb(170, 174, 185) : level is <= LowThreshold
             ? Color.FromArgb(255, 78, 78)
             : Color.White;
-        using var mouseFill = new SolidBrush(Color.FromArgb(47, 51, 62));
-        using var mouseLine = new Pen(Color.FromArgb(221, 225, 235), 1.35f);
-        g.FillRoundedRectangle(mouseFill, 11, 8, 16, 26, 7);
-        g.DrawRoundedRectangle(mouseLine, 11, 8, 16, 26, 7);
-        g.DrawLine(mouseLine, 19, 8.5f, 19, 17);
-        g.DrawLine(mouseLine, 16.5f, 15, 21.5f, 15);
+        using var mouseLine = new Pen(Color.White, 1.25f);
+        g.DrawRoundedRectangle(mouseLine, 4, 6, 16, 22, 7);
+        g.DrawLine(mouseLine, 12, 6.5f, 12, 13.5f);
+        g.DrawLine(mouseLine, 10.5f, 11, 13.5f, 11);
 
         string label = level is { } value ? $"{value}%" : "--%";
-        using var font = new Font("Segoe UI", label.Length >= 4 ? 18.5f : 21.5f, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var font = new Font("Segoe UI", label.Length >= 4 ? 15.5f : 16.5f, FontStyle.Regular, GraphicsUnit.Pixel);
         using var labelBrush = new SolidBrush(textColor);
-        g.DrawString(label, font, labelBrush, new PointF(37, 8));
-        if (charging && !sleeping)
-        {
-            using var chargingBrush = new SolidBrush(Color.FromArgb(88, 204, 255));
-            g.FillEllipse(chargingBrush, 29, 7, 5, 5);
-        }
-    }
-
-    private void UpdateRegion()
-    {
-        if (Width <= 0 || Height <= 0) return;
-        var path = new GraphicsPath();
-        path.AddRoundedRectangle(new RectangleF(0, 0, Width, Height), 8);
-        Region? old = Region;
-        Region = new Region(path);
-        old?.Dispose();
-        path.Dispose();
+        using var format = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
+        g.DrawString(label, font, labelBrush, new RectangleF(27, 0, Width - 29, Height), format);
     }
 
     private void SavePlacement()
