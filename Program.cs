@@ -28,6 +28,8 @@ internal sealed class BatteryContext : ApplicationContext
     private readonly System.Windows.Forms.Timer timer;
     private readonly ToolStripMenuItem stateItem;
     private readonly Control dispatcher = new();
+    private readonly BatteryWidget widget;
+    private readonly System.Windows.Forms.Timer dockTimer;
     private int? lastLevel;
     private bool charging;
     private bool querying;
@@ -41,6 +43,13 @@ internal sealed class BatteryContext : ApplicationContext
         menu.Items.Add(stateItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Refresh now", null, (_, _) => RefreshBattery());
+        var placement = new ToolStripMenuItem("Widget position");
+        AddPlacement(placement, "Before notification area", WidgetPlacement.BeforeTray);
+        AddPlacement(placement, "Left side of taskbar", WidgetPlacement.Left);
+        AddPlacement(placement, "Center of taskbar", WidgetPlacement.Center);
+        AddPlacement(placement, "Right side of taskbar", WidgetPlacement.Right);
+        menu.Items.Add(placement);
+        menu.Items.Add(new ToolStripMenuItem("Drag the widget to fine-tune its position") { Enabled = false });
         var startup = new ToolStripMenuItem("Start with Windows") { CheckOnClick = true, Checked = IsStartupEnabled() };
         startup.CheckedChanged += (_, _) => SetStartup(startup.Checked);
         menu.Items.Add(startup);
@@ -57,10 +66,20 @@ internal sealed class BatteryContext : ApplicationContext
             ContextMenuStrip = menu
         };
         tray.DoubleClick += (_, _) => RefreshBattery();
+        widget = new BatteryWidget(RefreshBattery) { ContextMenuStrip = menu };
+        widget.Show();
+        dockTimer = new System.Windows.Forms.Timer { Interval = 2500 };
+        dockTimer.Tick += (_, _) => widget.UpdateDockPosition();
+        dockTimer.Start();
         timer = new System.Windows.Forms.Timer { Interval = 60_000 };
         timer.Tick += (_, _) => RefreshBattery();
         timer.Start();
         RefreshBattery();
+    }
+
+    private void AddPlacement(ToolStripMenuItem parent, string label, WidgetPlacement placement)
+    {
+        parent.DropDownItems.Add(label, null, (_, _) => widget.SetPlacement(placement));
     }
 
     private void RefreshBattery()
@@ -82,6 +101,7 @@ internal sealed class BatteryContext : ApplicationContext
                     stateItem.Text = $"ROG Gladius III Wireless: {level}%{(charging ? " (charging)" : "")}";
                     tray.Text = $"MouseBat — ROG Gladius III Wireless: {level}%{(charging ? " · charging" : "")}";
                     SetTrayIcon(DrawIcon(level, charging));
+                    widget.SetBattery(level, charging, isSleeping: false);
                 }
                 else
                 {
@@ -90,6 +110,7 @@ internal sealed class BatteryContext : ApplicationContext
                         : "Mouse not responding — wake it or check its USB receiver";
                     tray.Text = "MouseBat — mouse asleep or unavailable";
                     SetTrayIcon(DrawIcon(lastLevel, charging, sleeping: true));
+                    widget.SetBattery(lastLevel, charging, isSleeping: true);
                 }
             });
         }, TaskScheduler.Default);
@@ -191,9 +212,13 @@ internal sealed class BatteryContext : ApplicationContext
     {
         exiting = true;
         timer.Stop();
+        dockTimer.Stop();
+        widget.Close();
+        widget.Dispose();
         tray.Visible = false;
         tray.Dispose();
         timer.Dispose();
+        dockTimer.Dispose();
         dispatcher.Dispose();
         base.ExitThreadCore();
     }
@@ -208,8 +233,270 @@ internal sealed class BatteryContext : ApplicationContext
     }
 }
 
+internal enum WidgetPlacement
+{
+    BeforeTray,
+    Left,
+    Center,
+    Right,
+    Custom
+}
+
+internal sealed class BatteryWidget : Form
+{
+    private const int LowThreshold = 20;
+    private readonly Action refreshBattery;
+    private readonly ToolTip toolTip = new();
+    private WidgetPlacement placement;
+    private int customOffset;
+    private int? level;
+    private bool charging;
+    private bool sleeping = true;
+    private bool dragging;
+    private bool dragged;
+    private Point dragScreenStart;
+    private Point dragWindowStart;
+
+    public BatteryWidget(Action refreshBattery)
+    {
+        this.refreshBattery = refreshBattery;
+        Text = "MouseBat battery";
+        AccessibleName = "MouseBat battery widget";
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        TopMost = true;
+        Size = new Size(116, 42);
+        MinimumSize = Size;
+        MaximumSize = Size;
+        BackColor = Color.FromArgb(29, 31, 39);
+        DoubleBuffered = true;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        placement = ReadPlacement();
+        customOffset = ReadCustomOffset();
+        toolTip.SetToolTip(this, "MouseBat — ROG Gladius III Wireless battery. Left-click to refresh; right-click for options; drag to move.");
+        MouseDown += WidgetMouseDown;
+        MouseMove += WidgetMouseMove;
+        MouseUp += WidgetMouseUp;
+        Shown += (_, _) => UpdateDockPosition();
+        SizeChanged += (_, _) => UpdateRegion();
+        UpdateRegion();
+    }
+
+    protected override bool ShowWithoutActivation => true;
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            CreateParams cp = base.CreateParams;
+            cp.ExStyle |= 0x00000080 | 0x08000000; // tool window; never activate the taskbar widget
+            return cp;
+        }
+    }
+
+    public void SetBattery(int? batteryLevel, bool isCharging, bool isSleeping)
+    {
+        level = batteryLevel;
+        charging = isCharging;
+        sleeping = isSleeping;
+        string value = level is { } n ? $"{n}%" : "--%";
+        string status = sleeping ? "mouse asleep or unavailable" : charging ? "charging" : "on battery";
+        toolTip.SetToolTip(this, $"ROG Gladius III Wireless: {value} ({status}). Left-click to refresh; right-click for options; drag to move.");
+        AccessibleDescription = $"ROG Gladius III Wireless battery {value}, {status}.";
+        Invalidate();
+    }
+
+    public void SetPlacement(WidgetPlacement newPlacement)
+    {
+        placement = newPlacement;
+        SavePlacement();
+        UpdateDockPosition();
+    }
+
+    public void UpdateDockPosition()
+    {
+        if (dragging || IsDisposed || !IsHandleCreated) return;
+        Rectangle taskbar = GetTaskbarBounds();
+        int y = taskbar.Top + Math.Max(0, (taskbar.Height - Height) / 2);
+        int x;
+        Rectangle tray = GetTrayBounds();
+        switch (placement)
+        {
+            case WidgetPlacement.Left:
+                x = taskbar.Left + Math.Max(56, taskbar.Height + 8);
+                break;
+            case WidgetPlacement.Center:
+                x = taskbar.Left + (taskbar.Width - Width) / 2;
+                break;
+            case WidgetPlacement.Right:
+                x = (tray.IsEmpty ? taskbar.Right : tray.Left) - Width * 2 - 10;
+                break;
+            case WidgetPlacement.Custom:
+                x = taskbar.Left + customOffset;
+                break;
+            default:
+                x = (tray.IsEmpty ? taskbar.Right : tray.Left) - Width - 8;
+                break;
+        }
+        x = Math.Max(taskbar.Left + 2, Math.Min(x, taskbar.Right - Width - 2));
+        Location = new Point(x, y);
+    }
+
+    private void WidgetMouseDown(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        dragging = true;
+        dragged = false;
+        dragScreenStart = Cursor.Position;
+        dragWindowStart = Location;
+        Capture = true;
+    }
+
+    private void WidgetMouseMove(object? sender, MouseEventArgs e)
+    {
+        if (!dragging) return;
+        Point cursor = Cursor.Position;
+        int dx = cursor.X - dragScreenStart.X;
+        int dy = cursor.Y - dragScreenStart.Y;
+        if (Math.Abs(dx) + Math.Abs(dy) > 2) dragged = true;
+        Rectangle taskbar = GetTaskbarBounds();
+        int x = Math.Max(taskbar.Left + 2, Math.Min(dragWindowStart.X + dx, taskbar.Right - Width - 2));
+        int y = taskbar.Top + Math.Max(0, (taskbar.Height - Height) / 2);
+        Location = new Point(x, y);
+    }
+
+    private void WidgetMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left || !dragging) return;
+        dragging = false;
+        Capture = false;
+        if (dragged)
+        {
+            placement = WidgetPlacement.Custom;
+            customOffset = Location.X - GetTaskbarBounds().Left;
+            SavePlacement();
+        }
+        else
+        {
+            toolTip.Show("Refreshing mouse battery…", this, Width / 2, Height, 1500);
+            refreshBattery();
+        }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        Graphics g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+        var panel = new RectangleF(0.75f, 0.75f, Width - 1.5f, Height - 1.5f);
+        using var path = new GraphicsPath();
+        path.AddRoundedRectangle(panel, 8);
+        using var background = new SolidBrush(BackColor);
+        using var border = new Pen(Color.FromArgb(92, 96, 109), 1.25f);
+        g.FillPath(background, path);
+        g.DrawPath(border, path);
+
+        Color textColor = sleeping ? Color.FromArgb(170, 174, 185) : level is <= LowThreshold
+            ? Color.FromArgb(255, 78, 78)
+            : Color.White;
+        using var mouseFill = new SolidBrush(Color.FromArgb(47, 51, 62));
+        using var mouseLine = new Pen(Color.FromArgb(221, 225, 235), 1.35f);
+        g.FillRoundedRectangle(mouseFill, 11, 8, 16, 26, 7);
+        g.DrawRoundedRectangle(mouseLine, 11, 8, 16, 26, 7);
+        g.DrawLine(mouseLine, 19, 8.5f, 19, 17);
+        g.DrawLine(mouseLine, 16.5f, 15, 21.5f, 15);
+
+        string label = level is { } value ? $"{value}%" : "--%";
+        using var font = new Font("Segoe UI", label.Length >= 4 ? 18.5f : 21.5f, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var labelBrush = new SolidBrush(textColor);
+        g.DrawString(label, font, labelBrush, new PointF(37, 8));
+        if (charging && !sleeping)
+        {
+            using var chargingBrush = new SolidBrush(Color.FromArgb(88, 204, 255));
+            g.FillEllipse(chargingBrush, 29, 7, 5, 5);
+        }
+    }
+
+    private void UpdateRegion()
+    {
+        if (Width <= 0 || Height <= 0) return;
+        var path = new GraphicsPath();
+        path.AddRoundedRectangle(new RectangleF(0, 0, Width, Height), 8);
+        Region? old = Region;
+        Region = new Region(path);
+        old?.Dispose();
+        path.Dispose();
+    }
+
+    private void SavePlacement()
+    {
+        using var key = Registry.CurrentUser.CreateSubKey("Software\\MouseBat");
+        key.SetValue("WidgetPlacement", placement.ToString());
+        key.SetValue("WidgetOffset", customOffset, RegistryValueKind.DWord);
+    }
+
+    private static WidgetPlacement ReadPlacement()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey("Software\\MouseBat");
+        string? value = key?.GetValue("WidgetPlacement") as string;
+        return Enum.TryParse(value, out WidgetPlacement result) ? result : WidgetPlacement.BeforeTray;
+    }
+
+    private static int ReadCustomOffset()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey("Software\\MouseBat");
+        return key?.GetValue("WidgetOffset") is int value ? value : 0;
+    }
+
+    private static Rectangle GetTaskbarBounds()
+    {
+        IntPtr handle = FindWindow("Shell_TrayWnd", null);
+        if (handle != IntPtr.Zero && GetWindowRect(handle, out NativeRect bounds))
+            return Rectangle.FromLTRB(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom);
+        Rectangle screen = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1080);
+        Rectangle work = Screen.PrimaryScreen?.WorkingArea ?? screen;
+        int height = Math.Max(36, screen.Bottom - work.Bottom);
+        return new Rectangle(screen.Left, screen.Bottom - height, screen.Width, height);
+    }
+
+    private static Rectangle GetTrayBounds()
+    {
+        IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
+        IntPtr tray = taskbar == IntPtr.Zero ? IntPtr.Zero : FindWindowEx(taskbar, IntPtr.Zero, "TrayNotifyWnd", null);
+        if (tray != IntPtr.Zero && GetWindowRect(tray, out NativeRect bounds))
+            return Rectangle.FromLTRB(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom);
+        return Rectangle.Empty;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string className, string? windowName);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string? windowName);
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowRect(IntPtr handle, out NativeRect rect);
+}
+
 internal static class GraphicsExtensions
 {
+    public static void AddRoundedRectangle(this GraphicsPath path, RectangleF bounds, float radius)
+    {
+        float diameter = radius * 2;
+        path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
+        path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);
+        path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+    }
     public static void FillRoundedRectangle(this Graphics g, Brush brush, float x, float y, float width, float height, float radius)
     {
         using var path = RoundedPath(x, y, width, height, radius);

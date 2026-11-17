@@ -2,9 +2,11 @@
 
 **A tiny Windows taskbar battery indicator made for the ASUS ROG Gladius III Wireless.**
 
-MouseBat reads the mouse's battery directly from its ASUS USB HID interface and puts a mouse glyph and percentage in the Windows notification area. At **20% or below**, the percentage turns red. Charging is marked with a blue dot.
+MouseBat reads the mouse's battery directly from its ASUS USB HID interface. It shows a **116 × 42 pixel widget at 100% display scale** over the Windows taskbar with a mouse glyph and readable percentage. At **20% or below**, the number turns red; charging is marked with a blue dot. The widget starts just left of the notification area.
 
-It runs quietly in the background, checks once a minute, and can start when you sign in. It does not need Armoury Crate, a driver, an account, or an internet connection while running. Right-click the taskbar icon to refresh, toggle startup, or exit.
+The widget can be dragged to another taskbar position. Right-click it (or the tray icon) to choose the left, center, right, or notification-area position, refresh the battery, toggle startup, or exit. It remembers a custom position across restarts. It runs quietly in the background and checks once a minute. It does not need Armoury Crate, a driver, an account, or an internet connection while running.
+
+Windows does not provide a native way to enlarge a single notification-area icon or insert custom text into the taskbar. MouseBat draws this movable widget over the taskbar instead. On a crowded taskbar, drag it to an open spot.
 
 ## Install
 

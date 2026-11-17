@@ -1,6 +1,6 @@
 #define AppName "MouseBat"
 #ifndef AppVersion
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 #endif
 #define AppPublisher "Jake Taylor"
 #define AppExeName "MouseBat.exe"
