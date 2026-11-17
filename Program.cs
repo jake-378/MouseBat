@@ -340,6 +340,7 @@ internal sealed class BatteryWidget : Form
         }
         x = Math.Max(taskbar.Left + 2, Math.Min(x, taskbar.Right - Width - 2));
         Location = new Point(x, y);
+        SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040);
     }
 
     private void WidgetMouseDown(object? sender, MouseEventArgs e)
@@ -484,6 +485,8 @@ internal sealed class BatteryWidget : Form
     private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string? windowName);
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(IntPtr handle, out NativeRect rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr handle, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 }
 
 internal static class GraphicsExtensions
