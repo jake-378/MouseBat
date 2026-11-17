@@ -25,18 +25,18 @@ def rounded(values, radius, fill, outline=None, width=1):
     )
 
 # A dark rounded tile, with an outlined gaming mouse and a bright battery badge.
-rounded((18, 18, 494, 494), 112, "#141B29", "#344258", 10)
-rounded((48, 40, 298, 470), 122, "#253247", "#E7F3FF", 16)
+rounded((18, 18, 494, 494), 112, "#000000", "#FFFFFF", 10)
+rounded((48, 40, 298, 470), 122, "#000000", "#FFFFFF", 16)
 draw.line(
     (153 * SCALE, 48 * SCALE, 153 * SCALE, 222 * SCALE),
-    fill="#C9E8FF",
+    fill="#FFFFFF",
     width=14 * SCALE,
 )
-rounded((131, 125, 175, 216), 22, "#78D8FF")
+rounded((131, 125, 175, 216), 22, "#FFFFFF")
 
 # Battery badge overlaps the lower-right of the mouse so both shapes read as one mark.
-rounded((260, 292, 458, 424), 30, "#101722", "#78D8FF", 16)
-rounded((455, 333, 484, 385), 9, "#78D8FF")
+rounded((260, 292, 458, 424), 30, "#000000", "#FFFFFF", 16)
+rounded((455, 333, 484, 385), 9, "#FFFFFF")
 bolt = [
     (365, 308),
     (325, 358),
@@ -45,7 +45,7 @@ bolt = [
     (394, 348),
     (362, 348),
 ]
-draw.polygon([(x * SCALE, y * SCALE) for x, y in bolt], fill="#C7F36B")
+draw.polygon([(x * SCALE, y * SCALE) for x, y in bolt], fill="#FFFFFF")
 
 # Supersampling keeps the small Windows taskbar and shortcut icon sizes crisp.
 image = image.resize((BASE, BASE), Image.Resampling.LANCZOS)
